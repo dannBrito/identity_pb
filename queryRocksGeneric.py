@@ -11,8 +11,8 @@ URL_QUERY = "https://prodesp.id.cyberark.cloud/Redrock/query"
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
-print("CLIENT_ID carregado?", CLIENT_ID is not None)
-print("CLIENT_SECRET carregado?", CLIENT_SECRET is not None)
+print("CLIENT_ID carregado?", CLIENT_ID )
+print("CLIENT_SECRET carregado?", CLIENT_SECRET)
 
 # 📁 caminho agora é relativo (funciona no GitHub)
 BASE_NOME_ARQUIVO = "baserole"
