@@ -1,17 +1,21 @@
 import requests
 import pandas as pd
 import time
+import os
 
 # ===== CONFIG =====
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
 URL_QUERY = "https://prodesp.id.cyberark.cloud/Redrock/query"
 
-CLIENT_ID = "prodesp_api"
-CLIENT_SECRET = ",m]6P\\wtxzdRIJXavymF2U3zhA,.dL;%pvGeF;^2"
+# 🔐 Pegando do GitHub Secrets
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
-BASE_NOME_ARQUIVO = "C:\\Users\\DaniloBrito\\Desktop\\Phyton\\Files BI\\baserole"
+# 📁 caminho agora é relativo (funciona no GitHub)
+BASE_NOME_ARQUIVO = "baserole"
+
 PAGE_SIZE = 100000
-LIMITE_EXCEL = 1000000  # margem segura abaixo do limite real
+LIMITE_EXCEL = 1000000  # margem segura
 
 # ===== TOKEN =====
 def gerar_token():
@@ -52,19 +56,19 @@ def extrair_usuarios():
 
         script = """
         SELECT
-    User.Username,
-    User.ID AS UserId,
-    Role.Name AS RoleName,
-    Role.ID AS RoleId
-FROM
-    RoleMember
-INNER JOIN User
-    ON User.ID = split_part(RoleMember.ID, '_', 1)
-INNER JOIN Role
-    ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
-ORDER BY
-    User.Username,
-    Role.Name;
+            User.Username,
+            User.ID AS UserId,
+            Role.Name AS RoleName,
+            Role.ID AS RoleId
+        FROM
+            RoleMember
+        INNER JOIN User
+            ON User.ID = split_part(RoleMember.ID, '_', 1)
+        INNER JOIN Role
+            ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
+        ORDER BY
+            User.Username,
+            Role.Name;
         """
 
         body = {
@@ -109,7 +113,7 @@ ORDER BY
         linhas = [item.get("Row", {}) for item in resultados]
         df = pd.DataFrame(linhas)
 
-        # 🔥 Verifica se precisa trocar de arquivo
+        # 🔥 troca de arquivo se necessário
         if linhas_na_parte >= LIMITE_EXCEL:
             parte += 1
             linhas_na_parte = 0
