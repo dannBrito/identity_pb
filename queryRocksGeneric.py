@@ -13,7 +13,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 BASE_NOME_ARQUIVO = "baserole"
 
 #  CONFIG OTIMIZADA
-PAGE_SIZE = 4000
+PAGE_SIZE = 5000
 MAX_PAGINAS = 50   # evita timeout no GitHub
 SLEEP = 0.3
 RETRY = 3
@@ -38,7 +38,7 @@ def gerar_token():
 def fazer_request(url, body, headers):
     for i in range(RETRY):
         try:
-            r = requests.post(url, json=body, headers=headers, timeout=30)
+            r = requests.post(url, json=body, headers=headers, timeout=120)
             return r
         except Exception as e:
             print(f" Tentativa {i+1} falhou: {e}", flush=True)
