@@ -17,7 +17,7 @@ print("CLIENT_SECRET carregado?", CLIENT_SECRET)
 #  caminho agora é relativo (funciona no GitHub)
 BASE_NOME_ARQUIVO = "baserole"
 
-PAGE_SIZE = 100000
+PAGE_SIZE = 5000
 LIMITE_EXCEL = 1000000  # margem segura
 
 # ===== TOKEN =====
