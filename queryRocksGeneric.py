@@ -38,7 +38,7 @@ def gerar_token():
 def fazer_request(url, body, headers):
     for i in range(RETRY):
         try:
-            r = requests.post(url, json=body, headers=headers, timeout=120)
+            r = requests.post(url, json=body, headers=headers, timeout=360)
             return r
         except Exception as e:
             print(f" Tentativa {i+1} falhou: {e}", flush=True)
