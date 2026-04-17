@@ -1,4 +1,5 @@
 import requests
+import pandas as pd
 import os
 
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
@@ -17,16 +18,13 @@ def gerar_token():
 
     r = requests.post(URL_TOKEN, data=body)
 
-    print("Status token:", r.status_code)
-    print("Resposta token:", r.text[:200])
-
     if r.status_code != 200:
-        raise Exception("Erro ao gerar token")
+        raise Exception(f"Erro ao gerar token: {r.text}")
 
     return r.json()["access_token"]
 
 
-def teste_query():
+def extrair_pequeno():
     token = gerar_token()
 
     headers = {
@@ -37,7 +35,7 @@ def teste_query():
     script = """
     SELECT
         User.Username,
-        User.ID
+        User.ID AS UserId
     FROM User
     """
 
@@ -45,16 +43,25 @@ def teste_query():
         "Script": script,
         "Args": {
             "PageNumber": 1,
-            "PageSize": 5,
-            "Caching": -1
+            "PageSize": 10
         }
     }
 
     r = requests.post(URL_QUERY, json=body, headers=headers)
 
-    print("Status query:", r.status_code)
-    print("Resposta query:", r.text[:500])
+    resposta = r.json()
+    resultados = resposta.get("Result", {}).get("Results", [])
+
+    linhas = [item.get("Row", {}) for item in resultados]
+    df = pd.DataFrame(linhas)
+
+    # salva CSV no GitHub runner
+    nome_arquivo = "teste.csv"
+    df.to_csv(nome_arquivo, index=False, sep=";")
+
+    print("Arquivo gerado:", nome_arquivo)
+    print(df.head())
 
 
 if __name__ == "__main__":
-    teste_query()
+    extrair_pequeno()
