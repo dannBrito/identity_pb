@@ -13,7 +13,7 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 BASE_NOME_ARQUIVO = "baserole"
 
 #  CONFIG OTIMIZADA
-PAGE_SIZE = 5000
+PAGE_SIZE = 4000
 MAX_PAGINAS = 50   # evita timeout no GitHub
 SLEEP = 0.3
 RETRY = 3
