@@ -23,7 +23,7 @@ jobs:
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        run: python queryRocksGeneric.py
+        run: python -u queryRocksGeneric.py
 
       
       - name: Commit and push CSV
