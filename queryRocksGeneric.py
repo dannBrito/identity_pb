@@ -35,7 +35,7 @@ def teste_query():
     }
 
     script = """
-    SELECT TOP 5
+    SELECT
         User.Username,
         User.ID
     FROM User
