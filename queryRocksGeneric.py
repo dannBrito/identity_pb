@@ -7,18 +7,16 @@ import os
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
 URL_QUERY = "https://prodesp.id.cyberark.cloud/Redrock/query"
 
-#  Pegando do GitHub Secrets
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
-print("CLIENT_ID carregado?", CLIENT_ID )
-print("CLIENT_SECRET carregado?", CLIENT_SECRET)
-
-#  caminho agora é relativo (funciona no GitHub)
 BASE_NOME_ARQUIVO = "baserole"
 
-PAGE_SIZE = 500
-LIMITE_EXCEL = 1000000  # margem segura
+#  CONFIG OTIMIZADA
+PAGE_SIZE = 5000
+MAX_PAGINAS = 50   # evita timeout no GitHub
+SLEEP = 0.3
+RETRY = 3
 
 # ===== TOKEN =====
 def gerar_token():
@@ -34,28 +32,41 @@ def gerar_token():
     if r.status_code != 200:
         raise Exception(f"Erro ao gerar token: {r.text}")
 
-    token = r.json()["access_token"]
+    return r.json()["access_token"]
 
-    return {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
-    }
+# ===== REQUEST COM RETRY =====
+def fazer_request(url, body, headers):
+    for i in range(RETRY):
+        try:
+            r = requests.post(url, json=body, headers=headers, timeout=30)
+            return r
+        except Exception as e:
+            print(f" Tentativa {i+1} falhou: {e}", flush=True)
+            time.sleep(2)
+    raise Exception(" Falha após várias tentativas")
 
 # ===== EXTRAÇÃO =====
 def extrair_usuarios():
 
-    headers = gerar_token()
-    pagina = 1
+    headers = {
+        "Authorization": f"Bearer {gerar_token()}",
+        "Content-Type": "application/json"
+    }
 
+    pagina = 1
     parte = 1
     linhas_na_parte = 0
     primeiro_bloco = True
-
     total_geral = 0
 
     while True:
 
-        print(f"\n📄 Página {pagina}")
+        # 🔥 controle de execução
+        if pagina > MAX_PAGINAS:
+            print(" Parando execução controlada (limite GitHub)", flush=True)
+            break
+
+        print(f"\n Página {pagina}", flush=True)
 
         script = """
         SELECT
@@ -71,7 +82,7 @@ def extrair_usuarios():
             ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
         ORDER BY
             User.Username,
-            Role.Name;
+            Role.Name
         """
 
         body = {
@@ -82,51 +93,46 @@ def extrair_usuarios():
                 "Caching": -1
             }
         }
-        time.sleep(2)
 
-        r = requests.post(URL_QUERY, json=body, headers=headers)
+        r = fazer_request(URL_QUERY, body, headers)
 
-        #  Token expirado
         if r.status_code == 401:
-            print(" Token expirado, renovando...")
-            headers = gerar_token()
+            print(" Token expirado, renovando...", flush=True)
+            headers["Authorization"] = f"Bearer {gerar_token()}"
             continue
 
         if r.status_code != 200:
-            print(" Erro HTTP:", r.status_code)
-            print(r.text)
+            print(" Erro HTTP:", r.status_code, flush=True)
+            print(r.text, flush=True)
             break
 
         resposta = r.json()
 
         if not resposta.get("success"):
-            print(" Erro na query:")
-            print(resposta)
+            print(" Erro na query:", resposta, flush=True)
             break
 
         resultados = resposta.get("Result", {}).get("Results", [])
         qtd = len(resultados)
 
-        print(f"   ➜ Registros recebidos: {qtd}")
+        print(f"   ➜ Recebidos: {qtd}", flush=True)
 
         if qtd == 0:
-            print(" Fim da extração.")
+            print(" Fim da extração.", flush=True)
             break
 
-        # Converter para DataFrame
         linhas = [item.get("Row", {}) for item in resultados]
         df = pd.DataFrame(linhas)
 
         #  troca de arquivo se necessário
-        if linhas_na_parte >= LIMITE_EXCEL:
+        if linhas_na_parte >= 1000000:
             parte += 1
             linhas_na_parte = 0
             primeiro_bloco = True
-            print(f" Novo arquivo: {BASE_NOME_ARQUIVO}_{parte}.csv")
+            print(f" Novo arquivo: {BASE_NOME_ARQUIVO}_{parte}.csv", flush=True)
 
         nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
 
-        # Salvar CSV
         df.to_csv(
             nome_arquivo,
             mode="w" if primeiro_bloco else "a",
@@ -139,18 +145,12 @@ def extrair_usuarios():
         linhas_na_parte += qtd
         total_geral += qtd
 
-        print(f"   Linhas no arquivo atual: {linhas_na_parte}")
-        print(f"   Total acumulado: {total_geral}")
-
-        # Última página
-        if qtd < PAGE_SIZE:
-            print(" Última página alcançada.")
-            break
+        print(f"    Total acumulado: {total_geral}", flush=True)
 
         pagina += 1
-        time.sleep(0.2)
+        time.sleep(SLEEP)
 
-    print(f"\n Extração finalizada! Total de registros: {total_geral}")
+    print(f"\n Finalizado! Total: {total_geral}", flush=True)
 
 # ===== EXECUÇÃO =====
 if __name__ == "__main__":
