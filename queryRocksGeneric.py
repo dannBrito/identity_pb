@@ -17,7 +17,7 @@ print("CLIENT_SECRET carregado?", CLIENT_SECRET)
 #  caminho agora é relativo (funciona no GitHub)
 BASE_NOME_ARQUIVO = "baserole"
 
-PAGE_SIZE = 5000
+PAGE_SIZE = 500
 LIMITE_EXCEL = 1000000  # margem segura
 
 # ===== TOKEN =====
@@ -82,6 +82,7 @@ def extrair_usuarios():
                 "Caching": -1
             }
         }
+        time.sleep(2)
 
         r = requests.post(URL_QUERY, json=body, headers=headers)
 
