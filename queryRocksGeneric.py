@@ -14,7 +14,6 @@ BASE_NOME_ARQUIVO = "baserole"
 
 #  CONFIG OTIMIZADA
 PAGE_SIZE = 5000
-MAX_PAGINAS = 50   # evita timeout no GitHub
 SLEEP = 0.3
 RETRY = 3
 
@@ -61,17 +60,14 @@ def extrair_usuarios():
 
     while True:
 
-        # 🔥 controle de execução
-        if pagina > MAX_PAGINAS:
-            print(" Parando execução controlada (limite GitHub)", flush=True)
-            break
-
         print(f"\n Página {pagina}", flush=True)
 
         script = """
         SELECT
             User.Username,
             User.ID AS UserId,
+            User.Status AS UserStatus,
+            User.LastLogin,
             Role.Name AS RoleName,
             Role.ID AS RoleId
         FROM
