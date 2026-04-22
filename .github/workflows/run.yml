@@ -17,7 +17,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install requests pandas
+        run: pip install requests
 
       - name: Run script
         env:
@@ -25,15 +25,14 @@ jobs:
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         run: python -u queryRocksGeneric.py
 
-      
       - name: Commit and push CSV
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-      
+
           git pull origin main --rebase
-      
+
           git add .
           git commit -m "Atualizando CSV automaticamente" || echo "Nada para commit"
-      
+
           git push
