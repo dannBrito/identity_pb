@@ -14,9 +14,9 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 BASE_NOME_ARQUIVO = "baserole"
 
 PAGE_SIZE = 3000
-RETRY = 3
-MAX_WORKERS = 3
+MAX_WORKERS = 2   # 🔥 reduz pressão na API
 LOTE_PAGINAS = 20
+RETRY = 3
 
 # ===== TOKEN =====
 def gerar_token():
@@ -28,20 +28,8 @@ def gerar_token():
     })
     return r.json()["access_token"]
 
-# ===== REQUEST =====
-def fazer_request(body, headers):
-    for i in range(RETRY):
-        try:
-            return requests.post(URL_QUERY, json=body, headers=headers, timeout=120)
-        except Exception as e:
-            print(f"⚠️ Tentativa {i+1} falhou: {e}", flush=True)
-            time.sleep(2)
-    return None
-
-# ===== BUSCAR PÁGINA =====
+# ===== BUSCAR PÁGINA (COM RETRY) =====
 def buscar_pagina(pagina, headers):
-
-    print(f"📄 Página {pagina}", flush=True)
 
     script = """
     SELECT
@@ -59,28 +47,34 @@ def buscar_pagina(pagina, headers):
         ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
     """
 
-    body = {
-        "Script": script,
-        "Args": {
-            "PageNumber": pagina,
-            "PageSize": PAGE_SIZE,
-            "Caching": -1
-        }
-    }
+    for tentativa in range(RETRY):
+        try:
+            print(f"📄 Página {pagina} (tentativa {tentativa+1})", flush=True)
 
-    r = fazer_request(body, headers)
+            body = {
+                "Script": script,
+                "Args": {
+                    "PageNumber": pagina,
+                    "PageSize": PAGE_SIZE,
+                    "Caching": -1
+                }
+            }
 
-    if not r or r.status_code != 200:
-        print(f"❌ Erro página {pagina}", flush=True)
-        return []
+            r = requests.post(URL_QUERY, json=body, headers=headers, timeout=120)
 
-    resultados = r.json().get("Result", {}).get("Results", [])
+            if r.status_code == 200:
+                resultados = r.json().get("Result", {}).get("Results", [])
+                linhas = [item.get("Row", {}) for item in resultados]
 
-    linhas = [item.get("Row", {}) for item in resultados]
+                print(f"✔ Página {pagina}: {len(linhas)} registros", flush=True)
+                return pagina, linhas
 
-    print(f"   ✔ Página {pagina}: {len(linhas)} registros", flush=True)
+        except Exception as e:
+            print(f"⚠️ Página {pagina} erro: {e}", flush=True)
+            time.sleep(3)
 
-    return linhas
+    print(f"❌ Página {pagina} falhou após retries", flush=True)
+    return pagina, []
 
 # ===== EXTRAÇÃO =====
 def extrair_usuarios():
@@ -96,11 +90,12 @@ def extrair_usuarios():
     total_geral = 0
 
     nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
-
     arquivo = open(nome_arquivo, mode="w", newline='', encoding='utf-8')
     writer = None
 
-    while True:
+    continuar = True
+
+    while continuar:
 
         paginas = range(pagina_inicial, pagina_inicial + LOTE_PAGINAS)
 
@@ -111,12 +106,14 @@ def extrair_usuarios():
 
             for future in as_completed(futures):
 
-                linhas = future.result()
+                pagina, linhas = future.result()
 
-                if not linhas:
-                    continue
+                if len(linhas) == 0:
+                    print(f"🏁 Página {pagina} retornou 0 → fim dos dados", flush=True)
+                    continuar = False
+                    break
 
-                # cria cabeçalho na primeira vez
+                # cria cabeçalho
                 if writer is None:
                     campos = linhas[0].keys()
                     writer = csv.DictWriter(arquivo, fieldnames=campos, delimiter=';')
@@ -145,6 +142,8 @@ def extrair_usuarios():
         pagina_inicial += LOTE_PAGINAS
 
     arquivo.close()
+
+    print(f"\n🎯 FINALIZADO! Total: {total_geral}", flush=True)
 
 # ===== EXECUÇÃO =====
 if __name__ == "__main__":
