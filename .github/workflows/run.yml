@@ -1,38 +1,47 @@
 name: Run Python Script
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # permite rodar manual
+  # 🔥 opcional (descomenta depois pra rodar automático)
+  # schedule:
+  #   - cron: '0 */2 * * *'  # a cada 2 horas
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
+      # 🔹 pega o código do repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      # 🔹 configura Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
+      # 🔹 instala libs
       - name: Install dependencies
-        run: pip install requests
+        run: pip install requests pandas
 
+      # 🔥 IMPORTANTE — sincroniza antes de gerar arquivo
+      - name: Prepare git (pull antes)
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git pull origin main --rebase || echo "Sem mudanças remotas"
+
+      # 🔹 roda seu script
       - name: Run script
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         run: python -u queryRocksGeneric.py
 
+      # 🔹 salva arquivo no repo
       - name: Commit and push CSV
         run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "actions@github.com"
-
-          git pull origin main --rebase
-
           git add .
           git commit -m "Atualizando CSV automaticamente" || echo "Nada para commit"
-
           git push
