@@ -1,7 +1,8 @@
 import requests
-import pandas as pd
 import time
 import os
+import csv
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ===== CONFIG =====
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
@@ -12,37 +13,74 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
 BASE_NOME_ARQUIVO = "baserole"
 
-#  CONFIG OTIMIZADA
-PAGE_SIZE = 50000
-SLEEP = 0.3
+PAGE_SIZE = 3000
 RETRY = 3
+MAX_WORKERS = 3
+LOTE_PAGINAS = 20
 
 # ===== TOKEN =====
 def gerar_token():
-    body = {
+    r = requests.post(URL_TOKEN, data={
         "client_id": CLIENT_ID,
         "client_secret": CLIENT_SECRET,
         "grant_type": "client_credentials",
         "scope": "all"
-    }
-
-    r = requests.post(URL_TOKEN, data=body)
-
-    if r.status_code != 200:
-        raise Exception(f"Erro ao gerar token: {r.text}")
-
+    })
     return r.json()["access_token"]
 
-# ===== REQUEST COM RETRY =====
-def fazer_request(url, body, headers):
+# ===== REQUEST =====
+def fazer_request(body, headers):
     for i in range(RETRY):
         try:
-            r = requests.post(url, json=body, headers=headers, timeout=100000)
-            return r
+            return requests.post(URL_QUERY, json=body, headers=headers, timeout=120)
         except Exception as e:
-            print(f" Tentativa {i+1} falhou: {e}", flush=True)
+            print(f"⚠️ Tentativa {i+1} falhou: {e}", flush=True)
             time.sleep(2)
-    raise Exception(" Falha após várias tentativas")
+    return None
+
+# ===== BUSCAR PÁGINA =====
+def buscar_pagina(pagina, headers):
+
+    print(f"📄 Página {pagina}", flush=True)
+
+    script = """
+    SELECT
+        User.Username,
+        User.ID AS UserId,
+        User.Status AS UserStatus,
+        User.LastLogin,
+        Role.Name AS RoleName,
+        Role.ID AS RoleId
+    FROM
+        RoleMember
+    INNER JOIN User
+        ON User.ID = split_part(RoleMember.ID, '_', 1)
+    INNER JOIN Role
+        ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
+    """
+
+    body = {
+        "Script": script,
+        "Args": {
+            "PageNumber": pagina,
+            "PageSize": PAGE_SIZE,
+            "Caching": -1
+        }
+    }
+
+    r = fazer_request(body, headers)
+
+    if not r or r.status_code != 200:
+        print(f"❌ Erro página {pagina}", flush=True)
+        return []
+
+    resultados = r.json().get("Result", {}).get("Results", [])
+
+    linhas = [item.get("Row", {}) for item in resultados]
+
+    print(f"   ✔ Página {pagina}: {len(linhas)} registros", flush=True)
+
+    return linhas
 
 # ===== EXTRAÇÃO =====
 def extrair_usuarios():
@@ -52,101 +90,61 @@ def extrair_usuarios():
         "Content-Type": "application/json"
     }
 
-    pagina = 1
+    pagina_inicial = 1
     parte = 1
     linhas_na_parte = 0
-    primeiro_bloco = True
     total_geral = 0
+
+    nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
+
+    arquivo = open(nome_arquivo, mode="w", newline='', encoding='utf-8')
+    writer = None
 
     while True:
 
-        print(f"\n Página {pagina}", flush=True)
+        paginas = range(pagina_inicial, pagina_inicial + LOTE_PAGINAS)
 
-        script = """
-        SELECT
-            User.Username,
-            User.ID AS UserId,
-            User.Status AS UserStatus,
-            User.LastLogin,
-            Role.Name AS RoleName,
-            Role.ID AS RoleId
-        FROM
-            RoleMember
-        INNER JOIN User
-            ON User.ID = split_part(RoleMember.ID, '_', 1)
-        INNER JOIN Role
-            ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
-        ORDER BY
-            User.Username,
-            Role.Name
-        """
+        print(f"\n🚀 Lote {pagina_inicial} até {pagina_inicial + LOTE_PAGINAS - 1}", flush=True)
 
-        body = {
-            "Script": script,
-            "Args": {
-                "PageNumber": pagina,
-                "PageSize": PAGE_SIZE,
-                "Caching": -1
-            }
-        }
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            futures = [executor.submit(buscar_pagina, p, headers) for p in paginas]
 
-        r = fazer_request(URL_QUERY, body, headers)
+            for future in as_completed(futures):
 
-        if r.status_code == 401:
-            print(" Token expirado, renovando...", flush=True)
-            headers["Authorization"] = f"Bearer {gerar_token()}"
-            continue
+                linhas = future.result()
 
-        if r.status_code != 200:
-            print(" Erro HTTP:", r.status_code, flush=True)
-            print(r.text, flush=True)
-            break
+                if not linhas:
+                    continue
 
-        resposta = r.json()
+                # cria cabeçalho na primeira vez
+                if writer is None:
+                    campos = linhas[0].keys()
+                    writer = csv.DictWriter(arquivo, fieldnames=campos, delimiter=';')
+                    writer.writeheader()
 
-        if not resposta.get("success"):
-            print(" Erro na query:", resposta, flush=True)
-            break
+                writer.writerows(linhas)
 
-        resultados = resposta.get("Result", {}).get("Results", [])
-        qtd = len(resultados)
+                linhas_na_parte += len(linhas)
+                total_geral += len(linhas)
 
-        print(f"   ➜ Recebidos: {qtd}", flush=True)
+                print(f"📊 Total acumulado: {total_geral}", flush=True)
 
-        if qtd == 0:
-            print(" Fim da extração.", flush=True)
-            break
+                # troca de arquivo
+                if linhas_na_parte >= 500000:
+                    arquivo.close()
 
-        linhas = [item.get("Row", {}) for item in resultados]
-        df = pd.DataFrame(linhas)
+                    parte += 1
+                    linhas_na_parte = 0
 
-        #  troca de arquivo se necessário
-        if linhas_na_parte >= 1000000:
-            parte += 1
-            linhas_na_parte = 0
-            primeiro_bloco = True
-            print(f" Novo arquivo: {BASE_NOME_ARQUIVO}_{parte}.csv", flush=True)
+                    nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
+                    arquivo = open(nome_arquivo, mode="w", newline='', encoding='utf-8')
+                    writer = None
 
-        nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
+                    print(f"📦 Novo arquivo: {nome_arquivo}", flush=True)
 
-        df.to_csv(
-            nome_arquivo,
-            mode="w" if primeiro_bloco else "a",
-            index=False,
-            header=primeiro_bloco,
-            sep=";"
-        )
+        pagina_inicial += LOTE_PAGINAS
 
-        primeiro_bloco = False
-        linhas_na_parte += qtd
-        total_geral += qtd
-
-        print(f"    Total acumulado: {total_geral}", flush=True)
-
-        pagina += 1
-        time.sleep(SLEEP)
-
-    print(f"\n Finalizado! Total: {total_geral}", flush=True)
+    arquivo.close()
 
 # ===== EXECUÇÃO =====
 if __name__ == "__main__":
