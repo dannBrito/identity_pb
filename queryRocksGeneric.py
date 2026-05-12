@@ -44,7 +44,7 @@ def gerar_token():
             "grant_type": "client_credentials",
             "scope": "all"
         },
-        timeout=60
+        timeout=120
     )
 
     if response.status_code != 200:
