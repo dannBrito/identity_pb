@@ -4,7 +4,9 @@ import os
 import csv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ===== CONFIG =====
+# ==================================================
+# CONFIG
+# ==================================================
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
 URL_QUERY = "https://prodesp.id.cyberark.cloud/Redrock/query"
 
@@ -13,18 +15,28 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 
 BASE_NOME_ARQUIVO = "baserole"
 
-PAGE_SIZE = 3000
-
-#  deixar 1 primeiro pra validar paginação
-MAX_WORKERS = 1
-
-LOTE_PAGINAS = 20
+PAGE_SIZE = 5000
 RETRY = 3
 
-# ===== TOKEN =====
+# 🔥 THREADS
+MAX_WORKERS = 3
+
+# 🔥 limite Excel
+LIMITE_LINHAS_ARQUIVO = 500000
+
+# 🔥 grupos balanceados
+GRUPOS = [
+    "0123",
+    "456",
+    "789"
+]
+
+# ==================================================
+# TOKEN
+# ==================================================
 def gerar_token():
 
-    r = requests.post(
+    response = requests.post(
         URL_TOKEN,
         data={
             "client_id": CLIENT_ID,
@@ -35,15 +47,21 @@ def gerar_token():
         timeout=60
     )
 
-    if r.status_code != 200:
-        raise Exception(f"Erro token: {r.text}")
+    if response.status_code != 200:
+        raise Exception(f"Erro token: {response.text}")
 
-    return r.json()["access_token"]
+    return response.json()["access_token"]
 
-# ===== REQUEST COM RETRY =====
-def buscar_pagina(pagina, headers):
+# ==================================================
+# REQUEST
+# ==================================================
+def buscar_pagina(headers, grupo, pagina):
 
-    script = """
+    filtros = " OR ".join(
+        [f"LOWER(User.Username) LIKE '{letra}%'" for letra in grupo]
+    )
+
+    script = f"""
     SELECT
         User.Username,
         User.ID AS UserId,
@@ -57,7 +75,8 @@ def buscar_pagina(pagina, headers):
         ON User.ID = split_part(RoleMember.ID, '_', 1)
     INNER JOIN Role
         ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
-    ORDER BY User.ID
+    WHERE
+        {filtros}
     """
 
     body = {
@@ -74,54 +93,110 @@ def buscar_pagina(pagina, headers):
         try:
 
             print(
-                f" Página {pagina} (tentativa {tentativa+1})",
+                f"📄 [{grupo}] Página {pagina} (tentativa {tentativa+1})",
                 flush=True
             )
 
-            r = requests.post(
+            response = requests.post(
                 URL_QUERY,
                 json=body,
                 headers=headers,
                 timeout=120
             )
 
-            if r.status_code == 401:
+            if response.status_code == 401:
                 raise Exception("Token expirado")
 
-            if r.status_code != 200:
-                raise Exception(f"HTTP {r.status_code} - {r.text}")
+            if response.status_code != 200:
+                raise Exception(
+                    f"HTTP {response.status_code} - {response.text}"
+                )
 
-            resposta = r.json()
+            resposta = response.json()
 
             resultados = resposta.get("Result", {}).get("Results", [])
 
             linhas = [item.get("Row", {}) for item in resultados]
 
             print(
-                f"✔ Página {pagina}: {len(linhas)} registros",
+                f"✔ [{grupo}] Página {pagina}: {len(linhas)} registros",
                 flush=True
             )
 
-            return pagina, linhas
+            return linhas
 
         except Exception as e:
 
             print(
-                f" Página {pagina} erro: {e}",
+                f"⚠️ [{grupo}] Página {pagina} erro: {e}",
                 flush=True
             )
 
             time.sleep(5)
 
     print(
-        f" Página {pagina} falhou após retries",
+        f"❌ [{grupo}] Página {pagina} falhou",
         flush=True
     )
 
-    return pagina, []
+    return []
 
+# ==================================================
+# PROCESSA GRUPO
+# ==================================================
+def processar_grupo(grupo, headers):
 
-# ===== EXTRAÇÃO =====
+    print(
+        f"\n🚀 PROCESSANDO GRUPO [{grupo}]",
+        flush=True
+    )
+
+    dados_grupo = []
+
+    pagina = 1
+
+    while True:
+
+        linhas = buscar_pagina(
+            headers=headers,
+            grupo=grupo,
+            pagina=pagina
+        )
+
+        if len(linhas) == 0:
+
+            print(
+                f"🏁 Fim grupo [{grupo}]",
+                flush=True
+            )
+
+            break
+
+        dados_grupo.extend(linhas)
+
+        print(
+            f"📊 [{grupo}] Total acumulado: {len(dados_grupo)}",
+            flush=True
+        )
+
+        if len(linhas) < PAGE_SIZE:
+
+            print(
+                f"🏁 Última página grupo [{grupo}]",
+                flush=True
+            )
+
+            break
+
+        pagina += 1
+
+        time.sleep(0.3)
+
+    return dados_grupo
+
+# ==================================================
+# EXTRAÇÃO
+# ==================================================
 def extrair_usuarios():
 
     token = gerar_token()
@@ -131,13 +206,11 @@ def extrair_usuarios():
         "Content-Type": "application/json"
     }
 
-    pagina_inicial = 1
-
-    parte = 1
-    linhas_na_parte = 0
     total_geral = 0
 
-    continuar = True
+    # 🔥 CONTROLE ARQUIVOS
+    parte = 1
+    linhas_arquivo = 0
 
     nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
 
@@ -150,79 +223,58 @@ def extrair_usuarios():
 
     writer = None
 
-    while continuar:
+    print(
+        f"📦 Criando arquivo: {nome_arquivo}",
+        flush=True
+    )
 
-        paginas = range(
-            pagina_inicial,
-            pagina_inicial + LOTE_PAGINAS
-        )
+    # ==================================================
+    # THREADS
+    # ==================================================
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
 
-        print(
-            f"\n Lote {pagina_inicial} até {pagina_inicial + LOTE_PAGINAS - 1}",
-            flush=True
-        )
+        futures = [
+            executor.submit(processar_grupo, grupo, headers)
+            for grupo in GRUPOS
+        ]
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        for future in as_completed(futures):
 
-            futures = [
-                executor.submit(buscar_pagina, p, headers)
-                for p in paginas
-            ]
+            dados_grupo = future.result()
 
-            for future in as_completed(futures):
+            if not dados_grupo:
+                continue
 
-                pagina, linhas = future.result()
+            # 🔥 cria cabeçalho
+            if writer is None:
 
-                #  valida fim real
-                if len(linhas) == 0:
+                campos = dados_grupo[0].keys()
 
-                    print(
-                        f"🏁 Página {pagina} retornou 0 registros",
-                        flush=True
-                    )
-
-                    continuar = False
-                    break
-
-                #  LOG DE PAGINAÇÃO
-                primeiro_id = linhas[0].get("UserId")
-                ultimo_id = linhas[-1].get("UserId")
-
-                print(
-                    f"📌 Página {pagina} | Primeiro ID: {primeiro_id} | Último ID: {ultimo_id}",
-                    flush=True
+                writer = csv.DictWriter(
+                    arquivo,
+                    fieldnames=campos,
+                    delimiter=';'
                 )
 
-                # cria cabeçalho
-                if writer is None:
+                writer.writeheader()
 
-                    campos = linhas[0].keys()
+            # ==================================================
+            # ESCREVE LINHAS
+            # ==================================================
+            for linha in dados_grupo:
 
-                    writer = csv.DictWriter(
-                        arquivo,
-                        fieldnames=campos,
-                        delimiter=';'
-                    )
+                writer.writerow(linha)
 
-                    writer.writeheader()
+                linhas_arquivo += 1
+                total_geral += 1
 
-                writer.writerows(linhas)
-
-                linhas_na_parte += len(linhas)
-                total_geral += len(linhas)
-
-                print(
-                    f"📊 Total acumulado: {total_geral}",
-                    flush=True
-                )
-
-                #  troca arquivo
-                if linhas_na_parte >= 500000:
+                # 🔥 troca arquivo
+                if linhas_arquivo >= LIMITE_LINHAS_ARQUIVO:
 
                     arquivo.close()
 
                     parte += 1
-                    linhas_na_parte = 0
+                    linhas_arquivo = 0
 
                     nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
 
@@ -233,37 +285,38 @@ def extrair_usuarios():
                         encoding='utf-8'
                     )
 
-                    writer = None
+                    writer = csv.DictWriter(
+                        arquivo,
+                        fieldnames=campos,
+                        delimiter=';'
+                    )
+
+                    writer.writeheader()
 
                     print(
-                        f" Novo arquivo: {nome_arquivo}",
+                        f"\n📦 Novo arquivo: {nome_arquivo}",
                         flush=True
                     )
 
-                
-                if pagina == pagina_inicial + LOTE_PAGINAS - 1:
-
-                    if len(linhas) < PAGE_SIZE:
-
-                        print(
-                            " Última página detectada",
-                            flush=True
-                        )
-
-                        continuar = False
-
-        pagina_inicial += LOTE_PAGINAS
-
-        time.sleep(1)
+            print(
+                f"📊 TOTAL GERAL: {total_geral}",
+                flush=True
+            )
 
     arquivo.close()
 
     print(
-        f"\n FINALIZADO! Total: {total_geral}",
+        f"\n🎯 FINALIZADO!",
         flush=True
     )
 
+    print(
+        f"📊 TOTAL FINAL: {total_geral}",
+        flush=True
+    )
 
-# ===== EXECUÇÃO =====
+# ==================================================
+# EXECUÇÃO
+# ==================================================
 if __name__ == "__main__":
     extrair_usuarios()
