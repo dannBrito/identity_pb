@@ -1,4 +1,4 @@
-name: Run Python Script
+name: Run AllUsers Script
 
 on:
   workflow_dispatch:
