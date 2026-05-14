@@ -31,13 +31,13 @@ def gerar_token():
 # ===== BUSCAR PÁGINA (COM RETRY) =====
 def buscar_pagina(pagina, headers):
 
-    script = """
+    script = f"""
     SELECT
         User.Username,
         User.LastLogin
     FROM
         User
-
+"""
 
     for tentativa in range(RETRY):
         try:
