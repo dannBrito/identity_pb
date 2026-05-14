@@ -2,9 +2,10 @@ import requests
 import time
 import os
 import csv
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# ===== CONFIG =====
+# ==================================================
+# CONFIG
+# ==================================================
 URL_TOKEN = 'https://prodesp.id.cyberark.cloud/OAuth2/Token/PainelProdesp'
 URL_QUERY = "https://prodesp.id.cyberark.cloud/Redrock/query"
 
@@ -14,129 +15,257 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 BASE_NOME_ARQUIVO = "baseusers"
 
 PAGE_SIZE = 10000
-MAX_WORKERS = 3   
-LOTE_PAGINAS = 20
 RETRY = 3
 
-# ===== TOKEN =====
-def gerar_token():
-    r = requests.post(URL_TOKEN, data={
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "client_credentials",
-        "scope": "all"
-    })
-    return r.json()["access_token"]
+#  limite seguro Excel
+LIMITE_LINHAS_ARQUIVO = 500000
 
-# ===== BUSCAR PÁGINA (COM RETRY) =====
+# ==================================================
+# TOKEN
+# ==================================================
+def gerar_token():
+
+    response = requests.post(
+        URL_TOKEN,
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "grant_type": "client_credentials",
+            "scope": "all"
+        },
+        timeout=60
+    )
+
+    if response.status_code != 200:
+        raise Exception(f"Erro token: {response.text}")
+
+    return response.json()["access_token"]
+
+# ==================================================
+# BUSCAR PÁGINA
+# ==================================================
 def buscar_pagina(pagina, headers):
 
-    script = f"""
+    script = """
     SELECT
         User.Username,
         User.LastLogin
     FROM
         User
-"""
+    ORDER BY
+        User.Username
+    """
+
+    body = {
+        "Script": script,
+        "Args": {
+            "PageNumber": pagina,
+            "PageSize": PAGE_SIZE,
+            "Caching": -1
+        }
+    }
 
     for tentativa in range(RETRY):
+
         try:
-            print(f"📄 Página {pagina} (tentativa {tentativa+1})", flush=True)
 
-            body = {
-                "Script": script,
-                "Args": {
-                    "PageNumber": pagina,
-                    "PageSize": PAGE_SIZE,
-                    "Caching": -1
-                }
-            }
+            print(
+                f" Página {pagina} (tentativa {tentativa+1})",
+                flush=True
+            )
 
-            r = requests.post(URL_QUERY, json=body, headers=headers, timeout=120)
+            response = requests.post(
+                URL_QUERY,
+                json=body,
+                headers=headers,
+                timeout=120
+            )
 
-            if r.status_code == 200:
-                resultados = r.json().get("Result", {}).get("Results", [])
-                linhas = [item.get("Row", {}) for item in resultados]
+            if response.status_code == 401:
+                raise Exception("Token expirado")
 
-                print(f"✔ Página {pagina}: {len(linhas)} registros", flush=True)
-                return pagina, linhas
+            if response.status_code != 200:
+                raise Exception(
+                    f"HTTP {response.status_code} - {response.text}"
+                )
+
+            resposta = response.json()
+
+            resultados = resposta.get(
+                "Result",
+                {}
+            ).get(
+                "Results",
+                []
+            )
+
+            linhas = [
+                item.get("Row", {})
+                for item in resultados
+            ]
+
+            print(
+                f"✔ Página {pagina}: {len(linhas)} registros",
+                flush=True
+            )
+
+            return linhas
 
         except Exception as e:
-            print(f"⚠️ Página {pagina} erro: {e}", flush=True)
-            time.sleep(3)
 
-    print(f"❌ Página {pagina} falhou após retries", flush=True)
-    return pagina, []
+            print(
+                f" Página {pagina} erro: {e}",
+                flush=True
+            )
 
-# ===== EXTRAÇÃO =====
+            time.sleep(5)
+
+    print(
+        f" Página {pagina} falhou após retries",
+        flush=True
+    )
+
+    return []
+
+# ==================================================
+# EXTRAÇÃO
+# ==================================================
 def extrair_usuarios():
 
+    token = gerar_token()
+
     headers = {
-        "Authorization": f"Bearer {gerar_token()}",
+        "Authorization": f"Bearer {token}",
         "Content-Type": "application/json"
     }
 
-    pagina_inicial = 1
+    pagina = 1
+
     parte = 1
-    linhas_na_parte = 0
+    linhas_no_arquivo = 0
     total_geral = 0
 
     nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
-    arquivo = open(nome_arquivo, mode="w", newline='', encoding='utf-8')
+
+    arquivo = open(
+        nome_arquivo,
+        mode="w",
+        newline='',
+        encoding='utf-8'
+    )
+
     writer = None
 
-    continuar = True
+    print(
+        f" Criando arquivo: {nome_arquivo}",
+        flush=True
+    )
 
-    while continuar:
+    while True:
 
-        paginas = range(pagina_inicial, pagina_inicial + LOTE_PAGINAS)
+        linhas = buscar_pagina(
+            pagina=pagina,
+            headers=headers
+        )
 
-        print(f"\n🚀 Lote {pagina_inicial} até {pagina_inicial + LOTE_PAGINAS - 1}", flush=True)
+        # fim paginação
+        if len(linhas) == 0:
 
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-            futures = [executor.submit(buscar_pagina, p, headers) for p in paginas]
+            print(
+                "🏁 Nenhum registro retornado. Finalizando.",
+                flush=True
+            )
 
-            for future in as_completed(futures):
+            break
 
-                pagina, linhas = future.result()
+        #  cria cabeçalho
+        if writer is None:
 
-                if len(linhas) == 0:
-                    print(f"🏁 Página {pagina} retornou 0 → fim dos dados", flush=True)
-                    continuar = False
-                    break
+            campos = linhas[0].keys()
 
-                # cria cabeçalho
-                if writer is None:
-                    campos = linhas[0].keys()
-                    writer = csv.DictWriter(arquivo, fieldnames=campos, delimiter=';')
-                    writer.writeheader()
+            writer = csv.DictWriter(
+                arquivo,
+                fieldnames=campos,
+                delimiter=';'
+            )
 
-                writer.writerows(linhas)
+            writer.writeheader()
 
-                linhas_na_parte += len(linhas)
-                total_geral += len(linhas)
+        #  escreve linhas
+        writer.writerows(linhas)
 
-                print(f"📊 Total acumulado: {total_geral}", flush=True)
+        linhas_no_arquivo += len(linhas)
+        total_geral += len(linhas)
 
-                # troca de arquivo
-                if linhas_na_parte >= 500000:
-                    arquivo.close()
+        print(
+            f" Página atual: {pagina}",
+            flush=True
+        )
 
-                    parte += 1
-                    linhas_na_parte = 0
+        print(
+            f" Linhas no arquivo: {linhas_no_arquivo}",
+            flush=True
+        )
 
-                    nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
-                    arquivo = open(nome_arquivo, mode="w", newline='', encoding='utf-8')
-                    writer = None
+        print(
+            f" Total geral: {total_geral}",
+            flush=True
+        )
 
-                    print(f"📦 Novo arquivo: {nome_arquivo}", flush=True)
+        # ==================================================
+        # TROCA ARQUIVO
+        # ==================================================
+        if linhas_no_arquivo >= LIMITE_LINHAS_ARQUIVO:
 
-        pagina_inicial += LOTE_PAGINAS
+            arquivo.close()
+
+            parte += 1
+            linhas_no_arquivo = 0
+
+            nome_arquivo = f"{BASE_NOME_ARQUIVO}_{parte}.csv"
+
+            arquivo = open(
+                nome_arquivo,
+                mode="w",
+                newline='',
+                encoding='utf-8'
+            )
+
+            writer = None
+
+            print(
+                f"\n Novo arquivo: {nome_arquivo}",
+                flush=True
+            )
+
+        #  última página
+        if len(linhas) < PAGE_SIZE:
+
+            print(
+                " Última página detectada.",
+                flush=True
+            )
+
+            break
+
+        pagina += 1
+
+        time.sleep(0.3)
 
     arquivo.close()
 
-    print(f"\n🎯 FINALIZADO! Total: {total_geral}", flush=True)
+    print(
+        f"\n FINALIZADO!",
+        flush=True
+    )
 
-# ===== EXECUÇÃO =====
+    print(
+        f" TOTAL FINAL: {total_geral}",
+        flush=True
+    )
+
+# ==================================================
+# EXECUÇÃO
+# ==================================================
 if __name__ == "__main__":
     extrair_usuarios()
