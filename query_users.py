@@ -49,7 +49,8 @@ def buscar_pagina(pagina, headers):
     script = """
     SELECT
         User.Username,
-        User.LastLogin
+        User.LastLogin,
+        User.Beneficiario_
     FROM
         User
     ORDER BY
