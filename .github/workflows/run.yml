@@ -1,7 +1,12 @@
-name: Run Python Script
+name: Run Python Pipeline
+
+concurrency:
+  group: identity-pipeline
+  cancel-in-progress: false
 
 on:
   workflow_dispatch:
+
   schedule:
     - cron: '0 2 * * *'
 
@@ -10,6 +15,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
       - name: Checkout repo
         uses: actions/checkout@v4
 
@@ -21,20 +27,23 @@ jobs:
       - name: Install dependencies
         run: pip install requests pandas
 
-      - name: Prepare git
+      - name: Setup git
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git pull origin main --rebase || echo "Sem mudanças remotas"
 
-      - name: Run script
+      - name: Run pipeline
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        run: python -u queryRocksGeneric.py
+        run: python -u main.py
 
       - name: Commit and push CSV
         run: |
           git add .
-          git commit -m "Atualizando CSV automaticamente" || echo "Nada para commit"
+
+          git commit -m "Atualização automática CSV" || echo "Nada para commit"
+
+          git pull --rebase origin main
+
           git push
