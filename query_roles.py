@@ -21,10 +21,10 @@ RETRY = 3
 # 🔥 THREADS
 MAX_WORKERS = 3
 
-# 🔥 limite Excel
-LIMITE_LINHAS_ARQUIVO = 500000
+# 🔥 limite GitHub / Excel
+LIMITE_LINHAS_ARQUIVO = 250000
 
-# 🔥 grupos balanceados
+# 🔥 grupos por número
 GRUPOS = [
     "0",
     "1",
@@ -35,7 +35,7 @@ GRUPOS = [
     "6",
     "7",
     "8",
-    "9"  
+    "9"
 ]
 
 # ==================================================
@@ -64,10 +64,6 @@ def gerar_token():
 # ==================================================
 def buscar_pagina(headers, grupo, pagina):
 
-    filtros = " OR ".join(
-        [f"LOWER(User.Username) LIKE '{letra}%'" for letra in grupo]
-    )
-
     script = f"""
     SELECT
         User.Username,
@@ -83,7 +79,7 @@ def buscar_pagina(headers, grupo, pagina):
     INNER JOIN Role
         ON Role.ID = regexp_replace(RoleMember.ID, '^[^_]+_', '')
     WHERE
-        {filtros}
+        LOWER(User.Username) LIKE '{grupo}%'
     """
 
     body = {
@@ -121,9 +117,18 @@ def buscar_pagina(headers, grupo, pagina):
 
             resposta = response.json()
 
-            resultados = resposta.get("Result", {}).get("Results", [])
+            resultados = resposta.get(
+                "Result",
+                {}
+            ).get(
+                "Results",
+                []
+            )
 
-            linhas = [item.get("Row", {}) for item in resultados]
+            linhas = [
+                item.get("Row", {})
+                for item in resultados
+            ]
 
             print(
                 f"✔ [{grupo}] Página {pagina}: {len(linhas)} registros",
@@ -186,6 +191,7 @@ def processar_grupo(grupo, headers):
             flush=True
         )
 
+        # 🔥 última página
         if len(linhas) < PAGE_SIZE:
 
             print(
@@ -204,7 +210,7 @@ def processar_grupo(grupo, headers):
 # ==================================================
 # EXTRAÇÃO
 # ==================================================
-def extrair_usuarios():
+def extrair_roles():
 
     token = gerar_token()
 
@@ -215,7 +221,9 @@ def extrair_usuarios():
 
     total_geral = 0
 
-    # 🔥 CONTROLE ARQUIVOS
+    # ==================================================
+    # CONTROLE CSV
+    # ==================================================
     parte = 1
     linhas_arquivo = 0
 
@@ -266,7 +274,7 @@ def extrair_usuarios():
                 writer.writeheader()
 
             # ==================================================
-            # ESCREVE LINHAS
+            # ESCREVE DADOS
             # ==================================================
             for linha in dados_grupo:
 
@@ -326,4 +334,4 @@ def extrair_usuarios():
 # EXECUÇÃO
 # ==================================================
 if __name__ == "__main__":
-    extrair_usuarios()
+    extrair_roles()
