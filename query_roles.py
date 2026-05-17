@@ -22,7 +22,7 @@ RETRY = 3
 MAX_WORKERS = 3
 
 # 🔥 limite GitHub / Excel
-LIMITE_LINHAS_ARQUIVO = 250000
+LIMITE_LINHAS_ARQUIVO = 500000
 
 # 🔥 grupos por número
 GRUPOS = [
