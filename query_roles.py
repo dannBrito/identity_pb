@@ -104,7 +104,7 @@ def buscar_pagina(headers, grupo, pagina):
                 URL_QUERY,
                 json=body,
                 headers=headers,
-                timeout=120
+                timeout=240
             )
 
             if response.status_code == 401:
