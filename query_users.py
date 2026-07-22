@@ -37,7 +37,7 @@ def gerar_token():
         },
         timeout=60
     )
-
+    print(data, flush=True)
     if response.status_code != 200:
         raise Exception(f"Erro token: {response.text}")
 
