@@ -24,8 +24,7 @@ LIMITE_LINHAS_ARQUIVO = 500000
 # TOKEN
 # ==================================================
 def gerar_token():
-    print(CLIENT_ID, flush=True)
-    print(CLIENT_SECRET, flush=True)
+
 
     response = requests.post(
         URL_TOKEN,
@@ -37,7 +36,7 @@ def gerar_token():
         },
         timeout=60
     )
-    print(data, flush=True)
+
     if response.status_code != 200:
         raise Exception(f"Erro token: {response.text}")
 
