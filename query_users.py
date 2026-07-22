@@ -24,8 +24,8 @@ LIMITE_LINHAS_ARQUIVO = 500000
 # TOKEN
 # ==================================================
 def gerar_token():
-print(CLIENT_ID, flush=True)
-print(CLIENT_SECRET, flush=True)
+    print(CLIENT_ID, flush=True)
+    print(CLIENT_SECRET, flush=True)
 
     response = requests.post(
         URL_TOKEN,
